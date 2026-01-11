@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendário de Agendamentos</title>
+  <link rel="stylesheet" href="style.css" />
+  <meta http-equiv="refresh" content="600">
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-dot"></div>
+      <div class="brand-title">Agenda • Nail Designer</div>
+    </div>
+    <button id="adminBtn" class="topbar-btn" type="button">Entrar (Admin)</button>
+  </div>
+
+  <!-- MODAL LOGIN -->
+  <div id="loginModal" class="modal" aria-hidden="true">
+    <div class="modal-overlay" data-close="true"></div>
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+      <div class="modal-header">
+        <h3 id="loginTitle">Admin</h3>
+        <button class="icon-btn close" type="button" aria-label="Fechar" data-close="true">&times;</button>
+      </div>
+
+      <form id="loginForm" autocomplete="off">
+        <div class="form-group">
+          <label for="adminUser">Usuário</label>
+          <input id="adminUser" type="text" required />
+        </div>
+
+        <div class="form-group">
+          <label for="adminPass">Senha</label>
+          <input id="adminPass" type="password" required />
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="cancel" data-close="true">Cancelar</button>
+          <button type="submit" class="save">Entrar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL AGENDAMENTO -->
+  <div id="appointmentModal" class="modal" aria-hidden="true">
+    <div class="modal-overlay" data-close="true"></div>
+
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-header">
+        <h3 id="modalTitle">Novo agendamento</h3>
+        <button class="icon-btn close" type="button" aria-label="Fechar" data-close="true">&times;</button>
+      </div>
+
+      <form id="appointmentForm" autocomplete="off">
+        <input type="hidden" id="editId" />
+        <input type="hidden" id="editDate" />
+
+        <div class="form-group">
+          <label for="clientName">Nome do cliente</label>
+          <input id="clientName" type="text" placeholder="Ex: Maria Silva" required />
+        </div>
+
+        <div class="form-group">
+          <label for="appointmentTime">Horário disponível (30 min)</label>
+          <select id="appointmentTime" required></select>
+          <div id="timeHint" class="hint"></div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" id="deleteBtn" class="danger" style="display:none;">Excluir</button>
+          <button type="button" class="cancel" data-close="true">Cancelar</button>
+          <button type="submit" id="saveBtn" class="save">Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- CALENDÁRIO -->
+  <div class="calendar">
+    <div class="calendar-header">
+      <button class="nav-btn" id="prev" type="button">‹</button>
+      <h2 class="month-title" id="month-year"></h2>
+      <button class="nav-btn" id="next" type="button">›</button>
+    </div>
+
+    <div class="weekdays">
+      <div class="weekday">Dom</div><div class="weekday">Seg</div><div class="weekday">Ter</div>
+      <div class="weekday">Qua</div><div class="weekday">Qui</div><div class="weekday">Sex</div><div class="weekday">Sáb</div>
+    </div>
+
+    <div class="days-grid" id="calendar-dates"></div>
+  </div>
+
+  <!-- WHATSAPP -->
+  <a id="whatsBtn" class="whats-fab" href="#" target="_blank" rel="noopener" aria-label="Agendar no WhatsApp" title="Agendar no WhatsApp">
+    <span class="whats-fab-icon">WA</span>
+    <span class="whats-fab-text">Agendar</span>
+  </a>
+
+  <script>
+    function pad2(n){ return String(n).padStart(2,'0'); }
+    function ymd(year, monthIndex, day){ return `${year}-${pad2(monthIndex+1)}-${pad2(day)}`; }
+
+    // WhatsApp
+    const WHATSAPP_NUMBER = "5511952914628";
+    function buildWhatsAppLink(message) {
+      return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+    }
+    document.getElementById('whatsBtn').href = buildWhatsAppLink("Olá! Gostaria de agendar um horário para unhas. Pode me ajudar?");
+
+    // Estado
+    const datesEl = document.getElementById('calendar-dates');
+    const monthYearEl = document.getElementById('month-year');
+    const prevBtn = document.getElementById('prev');
+    const nextBtn = document.getElementById('next');
+
+    const appointmentModal = document.getElementById('appointmentModal');
+    const appointmentForm = document.getElementById('appointmentForm');
+    const deleteBtn = document.getElementById('deleteBtn');
+
+    const inputId = document.getElementById('editId');
+    const inputDate = document.getElementById('editDate');
+    const inputName = document.getElementById('clientName');
+    const selectTime = document.getElementById('appointmentTime');
+    const timeHint = document.getElementById('timeHint');
+    const modalTitle = document.getElementById('modalTitle');
+
+    const adminBtn = document.getElementById('adminBtn');
+    const loginModal = document.getElementById('loginModal');
+    const loginForm = document.getElementById('loginForm');
+    const adminUser = document.getElementById('adminUser');
+    const adminPass = document.getElementById('adminPass');
+
+    let isAdmin = false;
+
+    let currentMonth = new Date().getMonth();
+    let currentYear = new Date().getFullYear();
+
+    const months = [
+      'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+      'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'
+    ];
+
+    // API
+    async function apiAuthStatus(){
+      const r = await fetch('api/auth.php');
+      return await r.json();
+    }
+    async function apiLogin(username, password){
+      const r = await fetch('api/auth.php', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({username, password})
+      });
+      return await r.json();
+    }
+    async function apiLogout(){
+      const r = await fetch('api/auth.php', { method: 'DELETE' });
+      return await r.json();
+    }
+
+    async function apiList(year, monthIndex){
+      const r = await fetch(`api/agendamentos.php?year=${year}&month=${monthIndex}`);
+      return await r.json();
+    }
+    async function apiAvailable(dateStr){
+      const r = await fetch(`api/agendamentos.php?available=1&date=${encodeURIComponent(dateStr)}`);
+      return await r.json();
+    }
+
+    async function apiCreate(payload){
+      const r = await fetch(`api/agendamentos.php`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      return await r.json();
+    }
+    async function apiUpdate(payload){
+      const r = await fetch(`api/agendamentos.php`, {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      return await r.json();
+    }
+    async function apiDelete(id){
+      const r = await fetch(`api/agendamentos.php`, {
+        method: 'DELETE',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id})
+      });
+      return await r.json();
+    }
+
+    // Modais
+    function openModal(el){
+      el.style.display = 'flex';
+      el.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('body-lock');
+    }
+    function closeModal(el){
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('body-lock');
+    }
+    document.querySelectorAll('.modal').forEach(m => {
+      m.addEventListener('click', (e) => {
+        const shouldClose = e.target?.dataset?.close === 'true';
+        if (shouldClose) closeModal(m);
+      });
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal').forEach(m => {
+          if (m.style.display === 'flex') closeModal(m);
+        });
+      }
+    });
+
+    // Admin UI
+    function applyAdminUI(){
+      adminBtn.textContent = isAdmin ? 'Sair (Admin)' : 'Entrar (Admin)';
+    }
+
+    async function syncAuth(){
+      const s = await apiAuthStatus();
+      isAdmin = !!s.authenticated;
+      applyAdminUI();
+    }
+
+    // Preenche select com horários disponíveis
+    async function fillAvailableTimes(dateStr, keepTimeIfEditing=null){
+      selectTime.innerHTML = '';
+      timeHint.textContent = 'Carregando horários...';
+
+      const r = await apiAvailable(dateStr);
+      if (!r.ok) {
+        timeHint.textContent = r.error || 'Erro ao carregar horários.';
+        return;
+      }
+
+      let list = Array.isArray(r.available) ? r.available.slice() : [];
+
+      // Se estiver editando, garantir que o horário atual apareça no select
+      if (keepTimeIfEditing && !list.includes(keepTimeIfEditing)) {
+        list.unshift(keepTimeIfEditing);
+      }
+
+      if (list.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Sem horários disponíveis';
+        selectTime.appendChild(opt);
+        selectTime.disabled = true;
+        timeHint.textContent = `Sem vagas em ${dateStr}.`;
+        return;
+      }
+
+      selectTime.disabled = false;
+
+      list.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        selectTime.appendChild(opt);
+      });
+
+      timeHint.textContent = `Disponíveis: ${list.length} (intervalo de ${r.step} min).`;
+    }
+
+    // Render calendário
+    async function renderCalendar(monthIndex, year) {
+      monthYearEl.textContent = `${months[monthIndex]} ${year}`;
+      datesEl.innerHTML = '';
+
+      const firstDayWeek = new Date(year, monthIndex, 1).getDay();
+      const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      const today = new Date();
+
+      const apiData = await apiList(year, monthIndex);
+
+      const dayMap = {};
+      apiData.forEach(d => { dayMap[parseInt(d.date)] = d.appointments || []; });
+
+      for (let i = 0; i < firstDayWeek; i++) {
+        const blank = document.createElement('div');
+        blank.className = 'day empty';
+        datesEl.appendChild(blank);
+      }
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = ymd(year, monthIndex, day);
+
+        const dayEl = document.createElement('div');
+        dayEl.className = 'day';
+        dayEl.dataset.date = dateStr;
+
+        if (year === today.getFullYear() && monthIndex === today.getMonth() && day === today.getDate()) {
+          dayEl.classList.add('current');
+        }
+
+        const dayNum = document.createElement('div');
+        dayNum.className = 'day-number';
+        dayNum.textContent = day;
+
+        const list = document.createElement('div');
+        list.className = 'appointments';
+
+        const apps = Array.isArray(dayMap[day]) ? dayMap[day] : [];
+
+        if (apps.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'no-appointments';
+          empty.textContent = isAdmin ? 'Clique para agendar' : 'Sem agendamentos';
+          list.appendChild(empty);
+        } else {
+          apps.forEach(app => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'appointment';
+            btn.textContent = `${app.name} - ${app.time}`;
+
+            btn.addEventListener('click', async (ev) => {
+              ev.stopPropagation();
+              if (!isAdmin) return;
+
+              modalTitle.textContent = 'Editar agendamento';
+              inputId.value = app.id;
+              inputDate.value = dateStr;
+              inputName.value = app.name;
+
+              deleteBtn.style.display = 'inline-flex';
+              openModal(appointmentModal);
+
+              await fillAvailableTimes(dateStr, app.time);
+              selectTime.value = app.time;
+            });
+
+            list.appendChild(btn);
+          });
+        }
+
+        dayEl.appendChild(dayNum);
+        dayEl.appendChild(list);
+
+        dayEl.addEventListener('click', async () => {
+          if (!isAdmin) return;
+
+          modalTitle.textContent = 'Novo agendamento';
+          inputId.value = '';
+          inputDate.value = dateStr;
+          inputName.value = '';
+          deleteBtn.style.display = 'none';
+
+          openModal(appointmentModal);
+          await fillAvailableTimes(dateStr, null);
+
+          setTimeout(()=>inputName.focus(),0);
+        });
+
+        datesEl.appendChild(dayEl);
+      }
+    }
+
+    // Admin events
+    adminBtn.addEventListener('click', async () => {
+      if (!isAdmin) {
+        openModal(loginModal);
+        setTimeout(()=>adminUser.focus(),0);
+      } else {
+        await apiLogout();
+        await syncAuth();
+        await renderCalendar(currentMonth, currentYear);
+      }
+    });
+
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const u = adminUser.value.trim();
+      const p = adminPass.value;
+
+      const r = await apiLogin(u, p);
+      if (!r.ok) { alert(r.error || 'Falha no login'); return; }
+
+      closeModal(loginModal);
+      adminPass.value = '';
+      await syncAuth();
+      await renderCalendar(currentMonth, currentYear);
+    });
+
+    // CRUD (admin)
+    appointmentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!isAdmin) return;
+
+      const id = inputId.value.trim();
+      const date = inputDate.value.trim();
+      const name = inputName.value.trim();
+      const time = selectTime.value;
+
+      if (!date || !name || !time) return;
+
+      if (!id) {
+        const r = await apiCreate({date, name, time});
+        if (!r.ok && !r.id) { alert(r.error || 'Erro ao salvar.'); return; }
+      } else {
+        const r = await apiUpdate({id: parseInt(id), date, name, time});
+        if (!r.ok) { alert(r.error || 'Erro ao atualizar.'); return; }
+      }
+
+      closeModal(appointmentModal);
+      await renderCalendar(currentMonth, currentYear);
+    });
+
+    deleteBtn.addEventListener('click', async () => {
+      if (!isAdmin) return;
+      const id = parseInt(inputId.value || '0');
+      if (!id) return;
+      if (!confirm('Excluir este agendamento?')) return;
+
+      const r = await apiDelete(id);
+      if (!r.ok) { alert(r.error || 'Erro ao excluir.'); return; }
+
+      closeModal(appointmentModal);
+      await renderCalendar(currentMonth, currentYear);
+    });
+
+    // Navegação
+    prevBtn.addEventListener('click', async () => {
+      currentMonth--;
+      if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+      await renderCalendar(currentMonth, currentYear);
+    });
+
+    nextBtn.addEventListener('click', async () => {
+      currentMonth++;
+      if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+      await renderCalendar(currentMonth, currentYear);
+    });
+
+    // Init
+    (async function init(){
+      await syncAuth();
+      await renderCalendar(currentMonth, currentYear);
+    })();
+  </script>
+</body>
+</html>
