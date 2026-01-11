@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+// Inicia sessão se ainda não iniciada
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 function db(): PDO
 {
     static $pdo = null;
@@ -36,4 +41,30 @@ function db(): PDO
     ]);
 
     return $pdo;
+}
+
+// Lê JSON do body e retorna array associativo
+function json_input(): array
+{
+    $raw = file_get_contents('php://input');
+    if (!$raw) return [];
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
+}
+
+// Envia resposta JSON e encerra
+function respond(int $status, $payload): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($payload);
+    exit;
+}
+
+// Verifica sessão de admin
+function require_admin(): void
+{
+    if (empty($_SESSION['admin_id'])) {
+        respond(401, ['ok' => false, 'error' => 'Acesso negado (admin).']);
+    }
 }
